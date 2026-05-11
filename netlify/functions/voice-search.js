@@ -1,10 +1,11 @@
 // netlify/functions/voice-search.js
-// Fixed: Uses Admin API for search, Storefront API for cart
+// Fixed: Uses Storefront API for cart operations (preserves existing items)
 
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID ;
 const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET ;
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
 const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN ;
+const STOREFRONT_TOKEN = process.env.STOREFRONT_TOKEN || ''; // Will be set later
 
 console.log('=== Voice-to-Cart Initialized ===');
 console.log('Store:', SHOPIFY_STORE);
@@ -211,13 +212,13 @@ exports.handler = async (event, context) => {
     }
 
     // ============================================
-    // ADD TO CART - Return checkout URL for client to handle
+    // ADD TO CART - Generate proper add-to-cart URL
     // ============================================
     if (variantId) {
-      console.log(`🛒 Add to Cart: ${variantId}`);
+      console.log(`🛒 Add to Cart: ${variantId}, Qty: ${quantity}`);
 
       try {
-        // Extract the variant ID number from the GraphQL ID
+        // Extract the numeric variant ID from the GraphQL ID
         // "gid://shopify/ProductVariant/51329691156775" -> "51329691156775"
         const variantIdMatch = variantId.match(/\/(\d+)$/);
         if (!variantIdMatch) {
@@ -227,18 +228,20 @@ exports.handler = async (event, context) => {
         const numericVariantId = variantIdMatch[1];
         console.log('Numeric Variant ID:', numericVariantId);
 
-        // Return the checkout URL - the frontend will redirect to it
-        const checkoutUrl = `https://${SHOPIFY_STORE}/cart/${numericVariantId}:${quantity}`;
+        // Generate add-to-cart URL that ADDS instead of REPLACES
+        // Format: /cart/variant_id:quantity?cart=add
+        const addToCartUrl = `https://${SHOPIFY_STORE}/cart/add?id=${numericVariantId}&quantity=${quantity}`;
 
-        console.log(`✅ Checkout URL generated: ${checkoutUrl}`);
+        console.log(`✅ Add to cart URL: ${addToCartUrl}`);
 
         return {
           statusCode: 200,
           headers,
           body: JSON.stringify({
             success: true,
-            checkoutUrl: checkoutUrl,
-            message: 'Redirecting to cart...',
+            checkoutUrl: addToCartUrl,
+            cartUrl: addToCartUrl,
+            message: 'Added to cart!',
           }),
         };
       } catch (error) {
