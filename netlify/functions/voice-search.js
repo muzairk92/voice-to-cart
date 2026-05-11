@@ -4,10 +4,10 @@
 // ============================================
 // CONFIGURATION
 // ============================================
-const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '983a67e105fdce76538ee7c588f6d321';
-const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET || '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';
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '9b14c6a09e2bd6b572fd2de3d8f7cdcc';
+const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET || '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';
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
-const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || 'atkn_e799a9b9c169de8a249074cc213915f6c6a9987e39d5db197fb364b1e9e078e6';
+const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || 'atkn_b7f2568feeda8144db28d581f11f30e5948f561928eeba999dd2a3b8f4513a56e';
 
 // ============================================
 // SHOPIFY GraphQL QUERIES
