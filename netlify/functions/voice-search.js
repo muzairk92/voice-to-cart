@@ -7,7 +7,7 @@
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '983a67e105fdce76538ee7c588f6d321';
 const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET || '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';
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
-const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || 'atkn_8e2263970508af62a3d08423b91e2f934b168f87193b131a4a8856d76588 8ec0';
+const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || 'atkn_e799a9b9c169de8a249074cc213915f6c6a9987e39d5db197fb364b1e9e078e6';
 
 // ============================================
 // SHOPIFY GraphQL QUERIES
