@@ -1,5 +1,5 @@
 // netlify/functions/voice-search.js
-// Voice Search API for Netlify Functions
+// Fixed version for Netlify Functions
 
 const axios = require('axios');
 
@@ -127,16 +127,18 @@ function findBestMatch(searchQuery, products) {
 }
 
 // ============================================
-// NETLIFY FUNCTION: Voice Search
+// CORS Headers
+// ============================================
+const headers = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Content-Type': 'application/json',
+};
+
+// ============================================
+// NETLIFY FUNCTION HANDLER
 // ============================================
 exports.handler = async (event, context) => {
-  // CORS Headers
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-  };
-
   // Handle preflight requests
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -147,16 +149,14 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const path = event.path;
+    const body = JSON.parse(event.body || '{}');
+    const { query, variantId, quantity = 1 } = body;
 
     // ============================================
-    // ROUTE: /voice-search - Search for products
+    // VOICE SEARCH - Search for products
     // ============================================
-    if (path.includes('/voice-search') && event.httpMethod === 'POST') {
-      const body = JSON.parse(event.body);
-      const { query } = body;
-
-      if (!query || query.trim().length === 0) {
+    if (query) {
+      if (!query.trim()) {
         return {
           statusCode: 400,
           headers,
@@ -219,12 +219,9 @@ exports.handler = async (event, context) => {
     }
 
     // ============================================
-    // ROUTE: /add-to-cart - Add product to cart
+    // ADD TO CART - Add product to cart
     // ============================================
-    if (path.includes('/add-to-cart') && event.httpMethod === 'POST') {
-      const body = JSON.parse(event.body);
-      const { variantId, quantity = 1 } = body;
-
+    if (variantId) {
       if (!variantId) {
         return {
           statusCode: 400,
@@ -270,27 +267,16 @@ exports.handler = async (event, context) => {
     }
 
     // ============================================
-    // ROUTE: /health - Health check
+    // DEFAULT - Health check or invalid request
     // ============================================
-    if (path.includes('/health')) {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          status: 'ok',
-          message: 'Voice-to-Cart API is running',
-          store: SHOPIFY_STORE,
-        }),
-      };
-    }
-
-    // 404 - Route not found
     return {
-      statusCode: 404,
+      statusCode: 200,
       headers,
       body: JSON.stringify({
-        success: false,
-        message: 'Endpoint not found',
+        status: 'ok',
+        message: 'Voice-to-Cart API is running',
+        store: SHOPIFY_STORE,
+        timestamp: new Date().toISOString(),
       }),
     };
   } catch (error) {
