@@ -1,0 +1,578 @@
+<!-- VOICE-TO-CART FLOATING BUTTON & SCRIPT -->
+<!-- Add this to your Shopify theme's liquid file or paste in Settings > Theme > Edit Code > theme.liquid -->
+
+<style>
+  /* Floating Mic Button Container */
+  .voice-search-widget {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 9999;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  /* Mic Button */
+  .voice-mic-button {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    transition: all 0.3s ease;
+    position: relative;
+  }
+
+  .voice-mic-button:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .voice-mic-button:active {
+    transform: scale(0.95);
+  }
+
+  /* Recording State */
+  .voice-mic-button.recording {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    50% {
+      box-shadow: 0 4px 30px rgba(245, 87, 108, 0.6);
+    }
+  }
+
+  /* Tooltip */
+  .voice-tooltip {
+    position: absolute;
+    bottom: 75px;
+    right: 0;
+    background: #333;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .voice-mic-button:hover .voice-tooltip {
+    opacity: 1;
+  }
+
+  /* Transcript Display */
+  .voice-transcript {
+    position: absolute;
+    bottom: 75px;
+    right: -200px;
+    background: white;
+    border: 2px solid #667eea;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    max-width: 250px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 10000;
+  }
+
+  .voice-transcript.show {
+    opacity: 1;
+  }
+
+  .voice-transcript.listening {
+    border-color: #f5576c;
+  }
+
+  /* Modal Overlay */
+  .voice-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+  }
+
+  .voice-modal-overlay.show {
+    display: flex;
+  }
+
+  /* Modal Card */
+  .voice-modal {
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 500px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    text-align: center;
+  }
+
+  .voice-modal h3 {
+    margin: 0 0 15px 0;
+    font-size: 20px;
+    color: #333;
+  }
+
+  .voice-modal p {
+    margin: 10px 0;
+    color: #666;
+    font-size: 14px;
+  }
+
+  .voice-modal.success {
+    color: #22c55e;
+  }
+
+  .voice-modal.error {
+    color: #ef4444;
+  }
+
+  /* Product Info */
+  .voice-product-info {
+    margin: 20px 0;
+    text-align: left;
+  }
+
+  .voice-product-image {
+    width: 100%;
+    max-width: 300px;
+    height: auto;
+    border-radius: 8px;
+    margin: 15px 0;
+  }
+
+  .voice-product-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin: 10px 0;
+    color: #333;
+  }
+
+  .voice-product-price {
+    font-size: 18px;
+    font-weight: bold;
+    color: #667eea;
+    margin: 10px 0;
+  }
+
+  /* Buttons */
+  .voice-button-group {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 20px;
+  }
+
+  .voice-btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+  }
+
+  .voice-btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  .voice-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  }
+
+  .voice-btn-secondary {
+    background: #f0f0f0;
+    color: #333;
+  }
+
+  .voice-btn-secondary:hover {
+    background: #e0e0e0;
+  }
+
+  /* Loading Spinner */
+  .voice-spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #667eea;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+    margin: 15px auto;
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Mobile Responsive */
+  @media (max-width: 768px) {
+    .voice-search-widget {
+      bottom: 20px;
+      right: 20px;
+    }
+
+    .voice-mic-button {
+      width: 50px;
+      height: 50px;
+      font-size: 20px;
+    }
+
+    .voice-modal {
+      margin: 20px;
+      max-width: 90vw;
+    }
+
+    .voice-transcript {
+      max-width: 200px;
+      right: -180px;
+    }
+  }
+</style>
+
+<div id="voice-search-widget" class="voice-search-widget">
+  <button id="voice-mic-button" class="voice-mic-button" title="Click to speak">
+    🎤
+    <div class="voice-tooltip">Click to speak</div>
+  </button>
+  <div id="voice-transcript" class="voice-transcript"></div>
+</div>
+
+<div id="voice-modal-overlay" class="voice-modal-overlay">
+  <div id="voice-modal" class="voice-modal">
+    <h3 id="voice-modal-title">Processing...</h3>
+    <p id="voice-modal-message"></p>
+    <div id="voice-product-info" class="voice-product-info"></div>
+    <div id="voice-modal-spinner" class="voice-spinner"></div>
+    <div id="voice-button-group" class="voice-button-group"></div>
+  </div>
+</div>
+
+<script>
+  // ============================================
+  // CONFIGURATION
+  // ============================================
+  const VOICE_API_URL = 'https://voice-cart-api.vercel.app'; // Will be replaced with your URL
+  const SHOPIFY_STORE = 'genfury.com';
+
+  // ============================================
+  // STATE MANAGEMENT
+  // ============================================
+  let isListening = false;
+  let recognition = null;
+  let currentProduct = null;
+
+  // ============================================
+  // INITIALIZE SPEECH RECOGNITION
+  // ============================================
+  function initSpeechRecognition() {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.error('Speech Recognition not supported in this browser');
+      alert('Sorry! Your browser does not support voice search. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    // ============================================
+    // SPEECH RECOGNITION EVENTS
+    // ============================================
+    recognition.onstart = () => {
+      isListening = true;
+      updateMicButton(true);
+      showTranscript('Listening... 👂', true);
+      console.log('🎤 Listening started');
+    };
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      let isFinal = false;
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcriptSegment = event.results[i][0].transcript;
+        transcript += transcriptSegment;
+        isFinal = event.results[i].isFinal;
+      }
+
+      showTranscript(`"${transcript}" ${isFinal ? '✓' : '...'}`, true);
+
+      if (isFinal) {
+        setTimeout(() => {
+          searchProduct(transcript.trim());
+        }, 500);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      hideTranscript();
+      updateMicButton(false);
+      showErrorModal(`Error: ${event.error}`);
+    };
+
+    recognition.onend = () => {
+      isListening = false;
+      updateMicButton(false);
+      hideTranscript();
+      console.log('🎤 Listening ended');
+    };
+  }
+
+  // ============================================
+  // HELPER FUNCTIONS - UI
+  // ============================================
+  function updateMicButton(recording) {
+    const btn = document.getElementById('voice-mic-button');
+    if (recording) {
+      btn.classList.add('recording');
+    } else {
+      btn.classList.remove('recording');
+    }
+  }
+
+  function showTranscript(text, isListening = false) {
+    const element = document.getElementById('voice-transcript');
+    element.textContent = text;
+    element.classList.add('show');
+    if (isListening) {
+      element.classList.add('listening');
+    }
+  }
+
+  function hideTranscript() {
+    const element = document.getElementById('voice-transcript');
+    element.classList.remove('show');
+    element.classList.remove('listening');
+  }
+
+  function showLoadingModal(message = 'Searching for product...') {
+    const overlay = document.getElementById('voice-modal-overlay');
+    const modal = document.getElementById('voice-modal');
+    const title = document.getElementById('voice-modal-title');
+    const msgEl = document.getElementById('voice-modal-message');
+    const spinner = document.getElementById('voice-modal-spinner');
+    const buttonGroup = document.getElementById('voice-button-group');
+
+    title.textContent = 'Finding Product';
+    msgEl.textContent = message;
+    spinner.style.display = 'block';
+    buttonGroup.innerHTML = '';
+    document.getElementById('voice-product-info').innerHTML = '';
+
+    overlay.classList.add('show');
+  }
+
+  function showSuccessModal(product) {
+    const overlay = document.getElementById('voice-modal-overlay');
+    const modal = document.getElementById('voice-modal');
+    const title = document.getElementById('voice-modal-title');
+    const msgEl = document.getElementById('voice-modal-message');
+    const productInfo = document.getElementById('voice-product-info');
+    const spinner = document.getElementById('voice-modal-spinner');
+    const buttonGroup = document.getElementById('voice-button-group');
+
+    title.textContent = '✅ Found It!';
+    title.classList.add('success');
+    msgEl.textContent = 'Perfect match! Add to your cart?';
+    spinner.style.display = 'none';
+
+    // Show product details
+    let productHTML = `<div class="voice-product-title">${product.title}</div>`;
+    if (product.image) {
+      productHTML += `<img src="${product.image}" alt="${product.title}" class="voice-product-image">`;
+    }
+    productHTML += `<div class="voice-product-price">$${product.price}</div>`;
+    productInfo.innerHTML = productHTML;
+
+    // Add buttons
+    buttonGroup.innerHTML = `
+      <button class="voice-btn voice-btn-primary" onclick="addToCart('${product.variantId}')">
+        Add to Cart
+      </button>
+      <button class="voice-btn voice-btn-secondary" onclick="closeModal()">
+        Close
+      </button>
+    `;
+
+    overlay.classList.add('show');
+    currentProduct = product;
+  }
+
+  function showErrorModal(message) {
+    const overlay = document.getElementById('voice-modal-overlay');
+    const title = document.getElementById('voice-modal-title');
+    const msgEl = document.getElementById('voice-modal-message');
+    const spinner = document.getElementById('voice-modal-spinner');
+    const buttonGroup = document.getElementById('voice-button-group');
+
+    title.textContent = '❌ Oops!';
+    title.classList.remove('success');
+    title.classList.add('error');
+    msgEl.textContent = message;
+    spinner.style.display = 'none';
+    document.getElementById('voice-product-info').innerHTML = '';
+
+    buttonGroup.innerHTML = `
+      <button class="voice-btn voice-btn-secondary" onclick="closeModal()">
+        Try Again
+      </button>
+    `;
+
+    overlay.classList.add('show');
+  }
+
+  function closeModal() {
+    document.getElementById('voice-modal-overlay').classList.remove('show');
+    document.getElementById('voice-modal-title').classList.remove('success', 'error');
+    currentProduct = null;
+  }
+
+  // ============================================
+  // MAIN FUNCTIONS - API CALLS
+  // ============================================
+  async function searchProduct(query) {
+    if (!query.trim()) {
+      showErrorModal('Please say something to search');
+      return;
+    }
+
+    showLoadingModal(`Searching for "${query}"...`);
+
+    try {
+      const response = await fetch(`${VOICE_API_URL}/api/voice-search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('✅ Product found:', data.product);
+        showSuccessModal(data.product);
+      } else {
+        showErrorModal(data.message || 'No products found');
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      showErrorModal('Failed to search. Please try again.');
+    }
+  }
+
+  async function addToCart(variantId) {
+    if (!variantId) {
+      showErrorModal('Product variant not found');
+      return;
+    }
+
+    showLoadingModal('Adding to cart...');
+
+    try {
+      const response = await fetch(`${VOICE_API_URL}/api/add-to-cart`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ variantId, quantity: 1 }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('✅ Added to cart');
+        const modal = document.getElementById('voice-modal');
+        const title = document.getElementById('voice-modal-title');
+        const msgEl = document.getElementById('voice-modal-message');
+        const spinner = document.getElementById('voice-modal-spinner');
+        const buttonGroup = document.getElementById('voice-button-group');
+
+        title.textContent = '🎉 Added!';
+        title.classList.add('success');
+        msgEl.textContent = 'Product added to your cart!';
+        spinner.style.display = 'none';
+        document.getElementById('voice-product-info').innerHTML = '';
+
+        buttonGroup.innerHTML = `
+          <button class="voice-btn voice-btn-primary" onclick="goToCart('${data.cartUrl}')">
+            View Cart
+          </button>
+          <button class="voice-btn voice-btn-secondary" onclick="closeModal()">
+            Continue Shopping
+          </button>
+        `;
+      } else {
+        showErrorModal(data.message || 'Failed to add to cart');
+      }
+    } catch (error) {
+      console.error('Add to cart error:', error);
+      showErrorModal('Failed to add to cart. Please try again.');
+    }
+  }
+
+  function goToCart(cartUrl) {
+    if (cartUrl) {
+      window.location.href = cartUrl;
+    }
+  }
+
+  // ============================================
+  // EVENT LISTENERS
+  // ============================================
+  document.getElementById('voice-mic-button').addEventListener('click', () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      recognition.start();
+    }
+  });
+
+  // Close modal on overlay click
+  document.getElementById('voice-modal-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'voice-modal-overlay') {
+      closeModal();
+    }
+  });
+
+  // ============================================
+  // INITIALIZE ON PAGE LOAD
+  // ============================================
+  window.addEventListener('DOMContentLoaded', () => {
+    console.log('🎤 Voice-to-Cart initialized');
+    initSpeechRecognition();
+  });
+</script>
