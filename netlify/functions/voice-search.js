@@ -1,7 +1,5 @@
 // netlify/functions/voice-search.js
-// Fixed version for Netlify Functions
-
-const axios = require('axios');
+// Simplified version without axios dependency
 
 // ============================================
 // CONFIGURATION
@@ -64,27 +62,30 @@ const ADD_TO_CART_MUTATION = `
 `;
 
 // ============================================
-// UTILITY: Make Shopify API Requests
+// UTILITY: Make Shopify API Requests (using fetch)
 // ============================================
 async function shopifyRequest(query, variables = {}) {
   try {
-    const response = await axios.post(
+    const response = await fetch(
       `https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`,
-      { query, variables },
       {
+        method: 'POST',
         headers: {
           'X-Shopify-Access-Token': AUTOMATION_TOKEN,
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ query, variables }),
       }
     );
 
-    if (response.data.errors) {
-      console.error('GraphQL Errors:', response.data.errors);
-      throw new Error(response.data.errors[0].message);
+    const data = await response.json();
+
+    if (data.errors) {
+      console.error('GraphQL Errors:', data.errors);
+      throw new Error(data.errors[0].message);
     }
 
-    return response.data.data;
+    return data.data;
   } catch (error) {
     console.error('Shopify API Error:', error.message);
     throw error;
@@ -139,6 +140,10 @@ const headers = {
 // NETLIFY FUNCTION HANDLER
 // ============================================
 exports.handler = async (event, context) => {
+  console.log('=== Voice-to-Cart Function Called ===');
+  console.log('Method:', event.httpMethod);
+  console.log('Body:', event.body);
+
   // Handle preflight requests
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -149,13 +154,17 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const body = JSON.parse(event.body || '{}');
+    const body = event.body ? JSON.parse(event.body) : {};
+    console.log('Parsed body:', body);
+
     const { query, variantId, quantity = 1 } = body;
 
     // ============================================
     // VOICE SEARCH - Search for products
     // ============================================
     if (query) {
+      console.log(`🎤 Voice Search: "${query}"`);
+
       if (!query.trim()) {
         return {
           statusCode: 400,
@@ -167,11 +176,11 @@ exports.handler = async (event, context) => {
         };
       }
 
-      console.log(`🎤 Voice Search: "${query}"`);
-
       // Search Shopify products
       const data = await shopifyRequest(SEARCH_PRODUCTS_QUERY, { query });
       const products = data.products.edges.map((edge) => edge.node);
+
+      console.log(`Found ${products.length} products`);
 
       if (products.length === 0) {
         return {
@@ -222,17 +231,6 @@ exports.handler = async (event, context) => {
     // ADD TO CART - Add product to cart
     // ============================================
     if (variantId) {
-      if (!variantId) {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({
-            success: false,
-            message: 'Variant ID is required',
-          }),
-        };
-      }
-
       console.log(`🛒 Adding to Cart: Variant ${variantId}, Qty: ${quantity}`);
 
       // Create cart with item
@@ -267,8 +265,9 @@ exports.handler = async (event, context) => {
     }
 
     // ============================================
-    // DEFAULT - Health check or invalid request
+    // DEFAULT - Health check
     // ============================================
+    console.log('Health check');
     return {
       statusCode: 200,
       headers,
@@ -280,7 +279,8 @@ exports.handler = async (event, context) => {
       }),
     };
   } catch (error) {
-    console.error('Function Error:', error);
+    console.error('❌ Function Error:', error);
+    console.error('Error stack:', error.stack);
     return {
       statusCode: 500,
       headers,
@@ -288,6 +288,7 @@ exports.handler = async (event, context) => {
         success: false,
         message: 'Server error',
         error: error.message,
+        stack: error.stack,
       }),
     };
   }
