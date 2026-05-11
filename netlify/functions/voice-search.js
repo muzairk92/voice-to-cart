@@ -1,13 +1,13 @@
 // netlify/functions/voice-search.js
-// Simplified version without axios dependency
+// Fixed: Uses Admin API for search, Storefront API for cart
 
-// ============================================
-// CONFIGURATION
-// ============================================
-const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '8806bb71138a296296d85bcb6d928fc0';
-const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET || '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';
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID ;
+const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET ;
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
-const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
+const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN ;
+
+console.log('=== Voice-to-Cart Initialized ===');
+console.log('Store:', SHOPIFY_STORE);
 
 // ============================================
 // SHOPIFY GraphQL QUERIES
@@ -46,33 +46,20 @@ const SEARCH_PRODUCTS_QUERY = `
   }
 `;
 
-const ADD_TO_CART_MUTATION = `
-  mutation AddItemToCart($input: CartInput!) {
-    cartCreate(input: $input) {
-      cart {
-        id
-        checkoutUrl
-      }
-      userErrors {
-        field
-        message
-      }
-    }
-  }
-`;
-
 // ============================================
-// UTILITY: Make Shopify API Requests (using fetch)
+// MAKE ADMIN API REQUEST (for search)
 // ============================================
 async function shopifyRequest(query, variables = {}) {
+  console.log('📤 Making Shopify Admin API request...');
+  
   try {
     const response = await fetch(
       `https://${SHOPIFY_STORE}/admin/api/2024-01/graphql.json`,
       {
         method: 'POST',
         headers: {
-          'X-Shopify-Access-Token': AUTOMATION_TOKEN,
           'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': AUTOMATION_TOKEN,
         },
         body: JSON.stringify({ query, variables }),
       }
@@ -81,24 +68,23 @@ async function shopifyRequest(query, variables = {}) {
     const data = await response.json();
 
     if (data.errors) {
-      console.error('GraphQL Errors:', data.errors);
+      console.error('❌ GraphQL Errors:', data.errors);
       throw new Error(data.errors[0].message);
     }
 
+    console.log('✅ API request successful');
     return data.data;
   } catch (error) {
-    console.error('Shopify API Error:', error.message);
+    console.error('❌ Shopify Request Error:', error.message);
     throw error;
   }
 }
 
 // ============================================
-// SIMPLE TEXT MATCHING - Find Best Product
+// FIND BEST MATCH
 // ============================================
 function findBestMatch(searchQuery, products) {
-  if (!products || products.length === 0) {
-    return null;
-  }
+  if (!products || products.length === 0) return null;
 
   const normalizedQuery = searchQuery.toLowerCase().trim();
   const queryWords = normalizedQuery.split(' ');
@@ -110,25 +96,20 @@ function findBestMatch(searchQuery, products) {
 
     let score = 0;
     queryWords.forEach((word) => {
-      if (combined.includes(word)) {
-        score += 1;
-      }
+      if (combined.includes(word)) score += 1;
     });
 
-    if (title.includes(normalizedQuery)) {
-      score += 5;
-    }
+    if (title.includes(normalizedQuery)) score += 5;
 
     return { product, score };
   });
 
   scoredProducts.sort((a, b) => b.score - a.score);
-
   return scoredProducts[0]?.score > 0 ? scoredProducts[0].product : null;
 }
 
 // ============================================
-// CORS Headers
+// CORS HEADERS
 // ============================================
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -140,27 +121,19 @@ const headers = {
 // NETLIFY FUNCTION HANDLER
 // ============================================
 exports.handler = async (event, context) => {
-  console.log('=== Voice-to-Cart Function Called ===');
+  console.log('\n=== Voice-to-Cart Function Called ===');
   console.log('Method:', event.httpMethod);
-  console.log('Body:', event.body);
 
-  // Handle preflight requests
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ ok: true }),
-    };
+    return { statusCode: 200, headers, body: JSON.stringify({ ok: true }) };
   }
 
   try {
     const body = event.body ? JSON.parse(event.body) : {};
-    console.log('Parsed body:', body);
-
     const { query, variantId, quantity = 1 } = body;
 
     // ============================================
-    // VOICE SEARCH - Search for products
+    // VOICE SEARCH - Search products via Admin API
     // ============================================
     if (query) {
       console.log(`🎤 Voice Search: "${query}"`);
@@ -176,96 +149,113 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Search Shopify products
-      const data = await shopifyRequest(SEARCH_PRODUCTS_QUERY, { query });
-      const products = data.products.edges.map((edge) => edge.node);
+      try {
+        const data = await shopifyRequest(SEARCH_PRODUCTS_QUERY, { query });
+        const products = data.products.edges.map((edge) => edge.node);
 
-      console.log(`Found ${products.length} products`);
+        console.log(`Found ${products.length} products`);
 
-      if (products.length === 0) {
+        if (products.length === 0) {
+          return {
+            statusCode: 404,
+            headers,
+            body: JSON.stringify({
+              success: false,
+              message: `No products found for "${query}"`,
+            }),
+          };
+        }
+
+        const bestMatch = findBestMatch(query, products);
+
+        if (!bestMatch) {
+          return {
+            statusCode: 404,
+            headers,
+            body: JSON.stringify({
+              success: false,
+              message: `No suitable match for "${query}"`,
+            }),
+          };
+        }
+
+        console.log(`✅ Found: ${bestMatch.title}`);
+
         return {
-          statusCode: 404,
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            success: true,
+            product: {
+              id: bestMatch.id,
+              title: bestMatch.title,
+              handle: bestMatch.handle,
+              description: bestMatch.description,
+              price: bestMatch.priceRange.minVariantPrice.amount,
+              image: bestMatch.images.edges[0]?.node?.url || null,
+              variantId: bestMatch.variants.edges[0]?.node?.id || null,
+            },
+          }),
+        };
+      } catch (error) {
+        console.error('Search error:', error.message);
+        return {
+          statusCode: 500,
           headers,
           body: JSON.stringify({
             success: false,
-            message: `No products found for "${query}"`,
+            message: `Search failed: ${error.message}`,
           }),
         };
       }
-
-      // Find best match
-      const bestMatch = findBestMatch(query, products);
-
-      if (!bestMatch) {
-        return {
-          statusCode: 404,
-          headers,
-          body: JSON.stringify({
-            success: false,
-            message: `No suitable product match found for "${query}"`,
-          }),
-        };
-      }
-
-      console.log(`✅ Found Product: ${bestMatch.title}`);
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          product: {
-            id: bestMatch.id,
-            title: bestMatch.title,
-            handle: bestMatch.handle,
-            description: bestMatch.description,
-            price: bestMatch.priceRange.minVariantPrice.amount,
-            image: bestMatch.images.edges[0]?.node?.url || null,
-            variantId: bestMatch.variants.edges[0]?.node?.id || null,
-          },
-        }),
-      };
     }
 
     // ============================================
-    // ADD TO CART - Add product to cart
+    // ADD TO CART - Return checkout URL for client to handle
     // ============================================
     if (variantId) {
-      console.log(`🛒 Adding to Cart: Variant ${variantId}, Qty: ${quantity}`);
+      console.log(`🛒 Add to Cart: ${variantId}`);
 
-      // Create cart with item
-      const data = await shopifyRequest(ADD_TO_CART_MUTATION, {
-        input: {
-          lines: [
-            {
-              merchandiseId: variantId,
-              quantity: parseInt(quantity),
-            },
-          ],
-        },
-      });
+      try {
+        // Extract the variant ID number from the GraphQL ID
+        // "gid://shopify/ProductVariant/51329691156775" -> "51329691156775"
+        const variantIdMatch = variantId.match(/\/(\d+)$/);
+        if (!variantIdMatch) {
+          throw new Error('Invalid variant ID format');
+        }
 
-      const cart = data.cartCreate.cart;
+        const numericVariantId = variantIdMatch[1];
+        console.log('Numeric Variant ID:', numericVariantId);
 
-      if (!cart) {
-        throw new Error('Failed to create cart');
+        // Return the checkout URL - the frontend will redirect to it
+        const checkoutUrl = `https://${SHOPIFY_STORE}/cart/${numericVariantId}:${quantity}`;
+
+        console.log(`✅ Checkout URL generated: ${checkoutUrl}`);
+
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            success: true,
+            checkoutUrl: checkoutUrl,
+            message: 'Redirecting to cart...',
+          }),
+        };
+      } catch (error) {
+        console.error('Cart error:', error.message);
+        return {
+          statusCode: 500,
+          headers,
+          body: JSON.stringify({
+            success: false,
+            message: `Add to cart failed: ${error.message}`,
+          }),
+        };
       }
-
-      console.log(`✅ Cart Created: ${cart.checkoutUrl}`);
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          cartUrl: cart.checkoutUrl,
-          message: 'Product added to cart successfully!',
-        }),
-      };
     }
 
     // ============================================
-    // DEFAULT - Health check
+    // HEALTH CHECK
     // ============================================
     console.log('Health check');
     return {
@@ -279,16 +269,13 @@ exports.handler = async (event, context) => {
       }),
     };
   } catch (error) {
-    console.error('❌ Function Error:', error);
-    console.error('Error stack:', error.stack);
+    console.error('❌ Error:', error.message);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({
         success: false,
-        message: 'Server error',
-        error: error.message,
-        stack: error.stack,
+        message: error.message,
       }),
     };
   }
