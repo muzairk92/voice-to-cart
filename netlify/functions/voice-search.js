@@ -4,8 +4,8 @@
 // ============================================
 // CONFIGURATION
 // ============================================
-const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '9b14c6a09e2bd6b572fd2de3d8f7cdcc';
-const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET || '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';
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID || '8806bb71138a296296d85bcb6d928fc0';
+const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET || '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';
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
 const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
 
