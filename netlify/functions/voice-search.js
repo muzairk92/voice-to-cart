@@ -1,19 +1,19 @@
 // netlify/functions/voice-search.js
-// DeepSeek V4 AI-powered product matching (optimized for accuracy)
+// DeepSeek V4 AI + Smart Fuzzy Matching for product search
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
 const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
-console.log('=== Voice-to-Cart with DeepSeek AI Initialized ===');
+console.log('=== Voice-to-Cart with DeepSeek AI + Fuzzy Match ===');
 console.log('Store:', SHOPIFY_STORE);
 
 // ============================================
-// SHOPIFY GraphQL QUERIES
+// SHOPIFY GraphQL - GET ALL PRODUCTS
 // ============================================
-const SEARCH_PRODUCTS_QUERY = `
-  query SearchProducts($query: String!) {
-    products(first: 20, query: $query) {
+const GET_ALL_PRODUCTS_QUERY = `
+  query GetAllProducts($first: Int!) {
+    products(first: $first) {
       edges {
         node {
           id
@@ -46,6 +46,58 @@ const SEARCH_PRODUCTS_QUERY = `
 `;
 
 // ============================================
+// SMART FUZZY MATCHING FUNCTION
+// ============================================
+function matchProducts(query, allProducts) {
+  const queryLower = query.toLowerCase().trim();
+  const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
+  
+  console.log(`🔍 Smart matching "${queryLower}" against ${allProducts.length} products`);
+  
+  const scored = allProducts
+    .map((product) => {
+      const titleLower = product.title.toLowerCase();
+      const descLower = (product.description || '').toLowerCase();
+      const combined = `${titleLower} ${descLower}`;
+      
+      let score = 0;
+      
+      // Exact title match = highest priority
+      if (titleLower === queryLower) {
+        score += 1000;
+      }
+      
+      // Phrase match in title
+      if (titleLower.includes(queryLower)) {
+        score += 500;
+      }
+      
+      // Count word matches
+      queryWords.forEach((word) => {
+        if (word.length > 2) {
+          // Match in title
+          if (titleLower.includes(word)) {
+            score += 100;
+          }
+          // Match in description
+          if (descLower.includes(word) && !titleLower.includes(word)) {
+            score += 20;
+          }
+        }
+      });
+      
+      return { product, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20);
+  
+  console.log(`✅ Found ${scored.length} matching products`);
+  
+  return scored.map((item) => item.product);
+}
+
+// ============================================
 // MAKE ADMIN API REQUEST
 // ============================================
 async function shopifyRequest(query, variables = {}) {
@@ -71,7 +123,6 @@ async function shopifyRequest(query, variables = {}) {
       throw new Error(data.errors[0].message);
     }
 
-    console.log('✅ API request successful');
     return data.data;
   } catch (error) {
     console.error('❌ Shopify Request Error:', error.message);
@@ -95,7 +146,7 @@ async function findBestProductWithAI(searchQuery, products) {
 
   // If only one product, return it
   if (products.length === 1) {
-    console.log(`Only one product found, returning: ${products[0].title}`);
+    console.log(`Only one match, returning: ${products[0].title}`);
     return products[0];
   }
 
@@ -107,21 +158,21 @@ async function findBestProductWithAI(searchQuery, products) {
       )
       .join('\n\n');
 
-    const systemPrompt = `You are a product matching expert. Given a customer's voice query and a list of relevant products, select the BEST match.
+    const systemPrompt = `You are a product matching expert. Given a customer's voice query and a list of matching products, select the BEST match.
 
 Return ONLY the product number (1-${products.length}) that most closely matches the customer's intent.
-- Consider color, size, style, and use case
-- Match intent and description, not just keywords
-- Return ONLY the number (e.g., "2"), nothing else`;
+- Consider all details: color, size, style, use case, material
+- Match intent and description accuracy
+- Return ONLY the number (e.g., "1"), nothing else`;
 
     const userPrompt = `Customer query: "${searchQuery}"
 
-Available products:
+Available matching products:
 ${productList}
 
 Best matching product number:`;
 
-    console.log('📤 Calling DeepSeek API for refinement...');
+    console.log('📤 Calling DeepSeek for refinement...');
 
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
@@ -135,7 +186,7 @@ Best matching product number:`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.3,
+        temperature: 0.2,
         max_tokens: 5,
       }),
     });
@@ -153,8 +204,7 @@ Best matching product number:`;
     const productIndex = parseInt(aiResponse) - 1;
 
     if (productIndex < 0 || productIndex >= products.length) {
-      // If AI can't decide, return the first match
-      console.log('AI response out of range, returning first match');
+      console.log('AI out of range, returning first match');
       return products[0];
     }
 
@@ -163,8 +213,8 @@ Best matching product number:`;
 
     return bestMatch;
   } catch (error) {
-    console.error('❌ DeepSeek Error:', error.message);
-    // Fallback to first product if AI fails
+    console.error('⚠️ DeepSeek Error:', error.message);
+    // Fallback to first match
     console.log('Falling back to first match');
     return products[0];
   }
@@ -195,7 +245,7 @@ exports.handler = async (event, context) => {
     const { query, variantId, quantity = 1 } = body;
 
     // ============================================
-    // VOICE SEARCH - HYBRID (Search + AI Refinement)
+    // VOICE SEARCH - SMART FUZZY + AI REFINEMENT
     // ============================================
     if (query) {
       console.log(`🎤 Voice Search: "${query}"`);
@@ -212,14 +262,16 @@ exports.handler = async (event, context) => {
       }
 
       try {
-        // Step 1: Search for products matching the query
-        console.log('🔍 Searching for products...');
-        const data = await shopifyRequest(SEARCH_PRODUCTS_QUERY, { query });
-        const products = data.products.edges.map((edge) => edge.node);
+        // Step 1: Get all products
+        console.log('📦 Fetching all products...');
+        const data = await shopifyRequest(GET_ALL_PRODUCTS_QUERY, { first: 250 });
+        const allProducts = data.products.edges.map((edge) => edge.node);
+        console.log(`Total products in store: ${allProducts.length}`);
+        
+        // Step 2: Smart fuzzy matching
+        const matchedProducts = matchProducts(query, allProducts);
 
-        console.log(`Found ${products.length} products`);
-
-        if (products.length === 0) {
+        if (matchedProducts.length === 0) {
           return {
             statusCode: 404,
             headers,
@@ -230,8 +282,8 @@ exports.handler = async (event, context) => {
           };
         }
 
-        // Step 2: Use DeepSeek AI to pick the best from search results
-        const bestMatch = await findBestProductWithAI(query, products);
+        // Step 3: Use DeepSeek AI to pick the best from matches
+        const bestMatch = await findBestProductWithAI(query, matchedProducts);
 
         if (!bestMatch) {
           return {
@@ -290,7 +342,7 @@ exports.handler = async (event, context) => {
         const numericVariantId = variantIdMatch[1];
         const addToCartUrl = `https://${SHOPIFY_STORE}/cart/add?id=${numericVariantId}&quantity=${quantity}`;
 
-        console.log(`✅ Add to cart URL: ${addToCartUrl}`);
+        console.log(`✅ Cart URL: ${addToCartUrl}`);
 
         return {
           statusCode: 200,
@@ -317,13 +369,12 @@ exports.handler = async (event, context) => {
     // ============================================
     // HEALTH CHECK
     // ============================================
-    console.log('Health check');
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         status: 'ok',
-        message: 'Voice-to-Cart API with DeepSeek AI is running',
+        message: 'Voice-to-Cart API is running',
         store: SHOPIFY_STORE,
         timestamp: new Date().toISOString(),
       }),
