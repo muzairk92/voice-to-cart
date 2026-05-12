@@ -160,10 +160,15 @@ async function findBestProductWithAI(searchQuery, products) {
 
     const systemPrompt = `You are a product matching expert. Given a customer's voice query and a list of matching products, select the BEST match.
 
-Return ONLY the product number (1-${products.length}) that most closely matches the customer's intent.
-- Consider all details: color, size, style, use case, material
-- Match intent and description accuracy
-- Return ONLY the number (e.g., "1"), nothing else`;
+PRIORITY RULES (in order):
+1. Exact brand AND model match (e.g., "Hustle 6.0" → find "Hustle Backpack 6.0")
+2. Partial exact match (e.g., "Hustle" in title)
+3. All keywords present in product
+4. Closest match by description
+
+Return ONLY the product number (1-${products.length}) that best matches the query.
+- Return ONLY the number (e.g., "1"), nothing else
+- If multiple options have similar scores, prefer the first one`;
 
     const userPrompt = `Customer query: "${searchQuery}"
 
