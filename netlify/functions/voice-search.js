@@ -1,11 +1,10 @@
 // netlify/functions/voice-search.js
-// DeepSeek V4 AI + Smart Fuzzy Matching for product search
+// Smart Fuzzy Matching for Product Search (Simple, Fast, Reliable)
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
 const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
-console.log('=== Voice-to-Cart with DeepSeek AI + Fuzzy Match ===');
+console.log('=== Voice-to-Cart with Smart Fuzzy Matching ===');
 console.log('Store:', SHOPIFY_STORE);
 
 // ============================================
@@ -52,7 +51,7 @@ function matchProducts(query, allProducts) {
   const queryLower = query.toLowerCase().trim();
   const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
   
-  console.log(`🔍 Smart matching "${queryLower}" against ${allProducts.length} products`);
+  console.log(`🔍 Fuzzy matching "${queryLower}" against ${allProducts.length} products`);
   
   const scored = allProducts
     .map((product) => {
@@ -62,26 +61,36 @@ function matchProducts(query, allProducts) {
       
       let score = 0;
       
-      // Exact title match = highest priority
+      // PRIORITY 1: Exact title match
       if (titleLower === queryLower) {
+        score += 10000;
+      }
+      
+      // PRIORITY 2: Phrase match in title
+      if (titleLower.includes(queryLower)) {
+        score += 5000;
+      }
+      
+      // PRIORITY 3: All query words in title
+      const allWordsInTitle = queryWords.every(word => titleLower.includes(word));
+      if (allWordsInTitle) {
         score += 1000;
       }
       
-      // Phrase match in title
-      if (titleLower.includes(queryLower)) {
-        score += 500;
-      }
-      
-      // Count word matches
+      // PRIORITY 4: Count matching words in title
       queryWords.forEach((word) => {
         if (word.length > 2) {
-          // Match in title
           if (titleLower.includes(word)) {
-            score += 100;
+            score += 500;
           }
-          // Match in description
+        }
+      });
+      
+      // PRIORITY 5: Partial matches in description
+      queryWords.forEach((word) => {
+        if (word.length > 2) {
           if (descLower.includes(word) && !titleLower.includes(word)) {
-            score += 20;
+            score += 50;
           }
         }
       });
@@ -90,11 +99,11 @@ function matchProducts(query, allProducts) {
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 20);
+    .slice(0, 1); // Return only the TOP match
   
-  console.log(`✅ Found ${scored.length} matching products`);
+  console.log(`✅ Found best match with score: ${scored[0]?.score || 0}`);
   
-  return scored.map((item) => item.product);
+  return scored.length > 0 ? scored[0].product : null;
 }
 
 // ============================================
@@ -123,105 +132,11 @@ async function shopifyRequest(query, variables = {}) {
       throw new Error(data.errors[0].message);
     }
 
+    console.log('✅ API request successful');
     return data.data;
   } catch (error) {
     console.error('❌ Shopify Request Error:', error.message);
     throw error;
-  }
-}
-
-// ============================================
-// USE DEEPSEEK AI TO REFINE PRODUCT MATCH
-// ============================================
-async function findBestProductWithAI(searchQuery, products) {
-  console.log(`🤖 Using DeepSeek V4 to refine match for: "${searchQuery}"`);
-
-  if (!DEEPSEEK_API_KEY) {
-    throw new Error('DEEPSEEK_API_KEY not configured');
-  }
-
-  if (!products || products.length === 0) {
-    return null;
-  }
-
-  // If only one product, return it
-  if (products.length === 1) {
-    console.log(`Only one match, returning: ${products[0].title}`);
-    return products[0];
-  }
-
-  try {
-    // Format products for AI analysis
-    const productList = products
-      .map((p, idx) => 
-        `${idx + 1}. ${p.title}\n   Description: ${p.description || 'N/A'}\n   Price: $${p.priceRange.minVariantPrice.amount}`
-      )
-      .join('\n\n');
-
-    const systemPrompt = `You are a product matching expert. Given a customer's voice query and a list of matching products, select the BEST match.
-
-PRIORITY RULES (in order):
-1. Exact brand AND model match (e.g., "Hustle 6.0" → find "Hustle Backpack 6.0")
-2. Partial exact match (e.g., "Hustle" in title)
-3. All keywords present in product
-4. Closest match by description
-
-Return ONLY the product number (1-${products.length}) that best matches the query.
-- Return ONLY the number (e.g., "1"), nothing else
-- If multiple options have similar scores, prefer the first one`;
-
-    const userPrompt = `Customer query: "${searchQuery}"
-
-Available matching products:
-${productList}
-
-Best matching product number:`;
-
-    console.log('📤 Calling DeepSeek for refinement...');
-
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 5,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error('❌ DeepSeek Error:', data);
-      throw new Error(data.error?.message || 'DeepSeek API error');
-    }
-
-    const aiResponse = data.choices[0].message.content.trim();
-    console.log('🤖 DeepSeek response:', aiResponse);
-
-    const productIndex = parseInt(aiResponse) - 1;
-
-    if (productIndex < 0 || productIndex >= products.length) {
-      console.log('AI out of range, returning first match');
-      return products[0];
-    }
-
-    const bestMatch = products[productIndex];
-    console.log(`✅ AI Selected: ${bestMatch.title}`);
-
-    return bestMatch;
-  } catch (error) {
-    console.error('⚠️ DeepSeek Error:', error.message);
-    // Fallback to first match
-    console.log('Falling back to first match');
-    return products[0];
   }
 }
 
@@ -250,7 +165,7 @@ exports.handler = async (event, context) => {
     const { query, variantId, quantity = 1 } = body;
 
     // ============================================
-    // VOICE SEARCH - SMART FUZZY + AI REFINEMENT
+    // VOICE SEARCH - SMART FUZZY MATCHING
     // ============================================
     if (query) {
       console.log(`🎤 Voice Search: "${query}"`);
@@ -267,16 +182,16 @@ exports.handler = async (event, context) => {
       }
 
       try {
-        // Step 1: Get all products
+        // Get all products
         console.log('📦 Fetching all products...');
         const data = await shopifyRequest(GET_ALL_PRODUCTS_QUERY, { first: 250 });
         const allProducts = data.products.edges.map((edge) => edge.node);
         console.log(`Total products in store: ${allProducts.length}`);
         
-        // Step 2: Smart fuzzy matching
-        const matchedProducts = matchProducts(query, allProducts);
+        // Smart fuzzy match - returns best match
+        const bestMatch = matchProducts(query, allProducts);
 
-        if (matchedProducts.length === 0) {
+        if (!bestMatch) {
           return {
             statusCode: 404,
             headers,
@@ -287,21 +202,7 @@ exports.handler = async (event, context) => {
           };
         }
 
-        // Step 3: Use DeepSeek AI to pick the best from matches
-        const bestMatch = await findBestProductWithAI(query, matchedProducts);
-
-        if (!bestMatch) {
-          return {
-            statusCode: 404,
-            headers,
-            body: JSON.stringify({
-              success: false,
-              message: `No suitable match found`,
-            }),
-          };
-        }
-
-        console.log(`✅ Returning: ${bestMatch.title}`);
+        console.log(`✅ Best Match: ${bestMatch.title}`);
 
         return {
           statusCode: 200,
@@ -374,6 +275,7 @@ exports.handler = async (event, context) => {
     // ============================================
     // HEALTH CHECK
     // ============================================
+    console.log('Health check');
     return {
       statusCode: 200,
       headers,
