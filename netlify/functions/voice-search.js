@@ -1,21 +1,20 @@
 // netlify/functions/voice-search.js
-// Fixed: Uses Storefront API for cart operations (preserves existing items)
+// DeepSeek V4 AI-powered product matching
 
-const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID ;
-const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET ;
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
-const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN ;
-const STOREFRONT_TOKEN = process.env.STOREFRONT_TOKEN || ''; // Will be set later
+const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
-console.log('=== Voice-to-Cart Initialized ===');
+console.log('=== Voice-to-Cart with DeepSeek AI Initialized ===');
 console.log('Store:', SHOPIFY_STORE);
+console.log('DeepSeek API Key:', DEEPSEEK_API_KEY ? 'Set ✓' : 'Missing ✗');
 
 // ============================================
 // SHOPIFY GraphQL QUERIES
 // ============================================
-const SEARCH_PRODUCTS_QUERY = `
-  query SearchProducts($query: String!) {
-    products(first: 10, query: $query) {
+const GET_ALL_PRODUCTS_QUERY = `
+  query GetAllProducts($first: Int!) {
+    products(first: $first) {
       edges {
         node {
           id
@@ -48,10 +47,10 @@ const SEARCH_PRODUCTS_QUERY = `
 `;
 
 // ============================================
-// MAKE ADMIN API REQUEST (for search)
+// MAKE ADMIN API REQUEST
 // ============================================
 async function shopifyRequest(query, variables = {}) {
-  console.log('📤 Making Shopify Admin API request...');
+  console.log('📤 Making Shopify API request...');
   
   try {
     const response = await fetch(
@@ -82,31 +81,88 @@ async function shopifyRequest(query, variables = {}) {
 }
 
 // ============================================
-// FIND BEST MATCH
+// USE DEEPSEEK AI TO MATCH PRODUCTS
 // ============================================
-function findBestMatch(searchQuery, products) {
-  if (!products || products.length === 0) return null;
+async function findProductWithAI(searchQuery, products) {
+  console.log(`🤖 Using DeepSeek V4 to find best match for: "${searchQuery}"`);
 
-  const normalizedQuery = searchQuery.toLowerCase().trim();
-  const queryWords = normalizedQuery.split(' ');
+  if (!DEEPSEEK_API_KEY) {
+    throw new Error('DEEPSEEK_API_KEY not configured');
+  }
 
-  const scoredProducts = products.map((product) => {
-    const title = product.title.toLowerCase();
-    const description = (product.description || '').toLowerCase();
-    const combined = `${title} ${description}`;
+  if (!products || products.length === 0) {
+    throw new Error('No products available to match');
+  }
 
-    let score = 0;
-    queryWords.forEach((word) => {
-      if (combined.includes(word)) score += 1;
+  try {
+    // Format products for AI analysis
+    const productList = products
+      .map((p, idx) => 
+        `${idx + 1}. ${p.title}\n   Description: ${p.description || 'N/A'}\n   Price: $${p.priceRange.minVariantPrice.amount}`
+      )
+      .join('\n\n');
+
+    const systemPrompt = `You are a product matching expert for an online store selling backpacks and outdoor gear.
+    
+Given a customer's voice query, analyze the available products and return ONLY the product number (1-${products.length}) that best matches their intent.
+
+Rules:
+- Consider color, size, style, and use case mentioned in the query
+- Match intent, not just keywords
+- Return ONLY the number, nothing else
+- If no suitable match, return 0`;
+
+    const userPrompt = `Customer query: "${searchQuery}"
+
+Available products:
+${productList}
+
+Return only the product number (or 0 if no match):`;
+
+    console.log('📤 Calling DeepSeek API...');
+
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 10,
+      }),
     });
 
-    if (title.includes(normalizedQuery)) score += 5;
+    const data = await response.json();
 
-    return { product, score };
-  });
+    if (!response.ok) {
+      console.error('❌ DeepSeek Error:', data);
+      throw new Error(data.error?.message || 'DeepSeek API error');
+    }
 
-  scoredProducts.sort((a, b) => b.score - a.score);
-  return scoredProducts[0]?.score > 0 ? scoredProducts[0].product : null;
+    const aiResponse = data.choices[0].message.content.trim();
+    console.log('🤖 DeepSeek response:', aiResponse);
+
+    const productIndex = parseInt(aiResponse) - 1;
+
+    if (productIndex < 0 || productIndex >= products.length) {
+      console.log('No suitable match found');
+      return null;
+    }
+
+    const bestMatch = products[productIndex];
+    console.log(`✅ AI Selected: ${bestMatch.title}`);
+
+    return bestMatch;
+  } catch (error) {
+    console.error('❌ DeepSeek Error:', error.message);
+    throw error;
+  }
 }
 
 // ============================================
@@ -134,7 +190,7 @@ exports.handler = async (event, context) => {
     const { query, variantId, quantity = 1 } = body;
 
     // ============================================
-    // VOICE SEARCH - Search products via Admin API
+    // VOICE SEARCH - AI-POWERED
     // ============================================
     if (query) {
       console.log(`🎤 Voice Search: "${query}"`);
@@ -151,7 +207,9 @@ exports.handler = async (event, context) => {
       }
 
       try {
-        const data = await shopifyRequest(SEARCH_PRODUCTS_QUERY, { query });
+        // Get ALL products from Shopify
+        console.log('📦 Fetching all products from Shopify...');
+        const data = await shopifyRequest(GET_ALL_PRODUCTS_QUERY, { first: 250 });
         const products = data.products.edges.map((edge) => edge.node);
 
         console.log(`Found ${products.length} products`);
@@ -162,12 +220,13 @@ exports.handler = async (event, context) => {
             headers,
             body: JSON.stringify({
               success: false,
-              message: `No products found for "${query}"`,
+              message: 'No products available',
             }),
           };
         }
 
-        const bestMatch = findBestMatch(query, products);
+        // Use DeepSeek AI to find best match
+        const bestMatch = await findProductWithAI(query, products);
 
         if (!bestMatch) {
           return {
@@ -175,12 +234,12 @@ exports.handler = async (event, context) => {
             headers,
             body: JSON.stringify({
               success: false,
-              message: `No suitable match for "${query}"`,
+              message: `No suitable product match found for "${query}"`,
             }),
           };
         }
 
-        console.log(`✅ Found: ${bestMatch.title}`);
+        console.log(`✅ Returning: ${bestMatch.title}`);
 
         return {
           statusCode: 200,
@@ -212,24 +271,18 @@ exports.handler = async (event, context) => {
     }
 
     // ============================================
-    // ADD TO CART - Generate proper add-to-cart URL
+    // ADD TO CART
     // ============================================
     if (variantId) {
       console.log(`🛒 Add to Cart: ${variantId}, Qty: ${quantity}`);
 
       try {
-        // Extract the numeric variant ID from the GraphQL ID
-        // "gid://shopify/ProductVariant/51329691156775" -> "51329691156775"
         const variantIdMatch = variantId.match(/\/(\d+)$/);
         if (!variantIdMatch) {
           throw new Error('Invalid variant ID format');
         }
 
         const numericVariantId = variantIdMatch[1];
-        console.log('Numeric Variant ID:', numericVariantId);
-
-        // Generate add-to-cart URL that ADDS instead of REPLACES
-        // Format: /cart/variant_id:quantity?cart=add
         const addToCartUrl = `https://${SHOPIFY_STORE}/cart/add?id=${numericVariantId}&quantity=${quantity}`;
 
         console.log(`✅ Add to cart URL: ${addToCartUrl}`);
@@ -240,7 +293,6 @@ exports.handler = async (event, context) => {
           body: JSON.stringify({
             success: true,
             checkoutUrl: addToCartUrl,
-            cartUrl: addToCartUrl,
             message: 'Added to cart!',
           }),
         };
@@ -266,7 +318,7 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         status: 'ok',
-        message: 'Voice-to-Cart API is running',
+        message: 'Voice-to-Cart API with DeepSeek AI is running',
         store: SHOPIFY_STORE,
         timestamp: new Date().toISOString(),
       }),
