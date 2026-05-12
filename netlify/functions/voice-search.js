@@ -1,5 +1,5 @@
 // netlify/functions/voice-search.js
-// DeepSeek V4 AI-powered product matching
+// DeepSeek V4 AI-powered product matching (optimized for accuracy)
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
 const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
@@ -7,14 +7,13 @@ const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 
 console.log('=== Voice-to-Cart with DeepSeek AI Initialized ===');
 console.log('Store:', SHOPIFY_STORE);
-console.log('DeepSeek API Key:', DEEPSEEK_API_KEY ? 'Set ✓' : 'Missing ✗');
 
 // ============================================
 // SHOPIFY GraphQL QUERIES
 // ============================================
-const GET_ALL_PRODUCTS_QUERY = `
-  query GetAllProducts($first: Int!) {
-    products(first: $first) {
+const SEARCH_PRODUCTS_QUERY = `
+  query SearchProducts($query: String!) {
+    products(first: 20, query: $query) {
       edges {
         node {
           id
@@ -81,17 +80,23 @@ async function shopifyRequest(query, variables = {}) {
 }
 
 // ============================================
-// USE DEEPSEEK AI TO MATCH PRODUCTS
+// USE DEEPSEEK AI TO REFINE PRODUCT MATCH
 // ============================================
-async function findProductWithAI(searchQuery, products) {
-  console.log(`🤖 Using DeepSeek V4 to find best match for: "${searchQuery}"`);
+async function findBestProductWithAI(searchQuery, products) {
+  console.log(`🤖 Using DeepSeek V4 to refine match for: "${searchQuery}"`);
 
   if (!DEEPSEEK_API_KEY) {
     throw new Error('DEEPSEEK_API_KEY not configured');
   }
 
   if (!products || products.length === 0) {
-    throw new Error('No products available to match');
+    return null;
+  }
+
+  // If only one product, return it
+  if (products.length === 1) {
+    console.log(`Only one product found, returning: ${products[0].title}`);
+    return products[0];
   }
 
   try {
@@ -102,24 +107,21 @@ async function findProductWithAI(searchQuery, products) {
       )
       .join('\n\n');
 
-    const systemPrompt = `You are a product matching expert for an online store selling backpacks and outdoor gear.
-    
-Given a customer's voice query, analyze the available products and return ONLY the product number (1-${products.length}) that best matches their intent.
+    const systemPrompt = `You are a product matching expert. Given a customer's voice query and a list of relevant products, select the BEST match.
 
-Rules:
-- Consider color, size, style, and use case mentioned in the query
-- Match intent, not just keywords
-- Return ONLY the number, nothing else
-- If no suitable match, return 0`;
+Return ONLY the product number (1-${products.length}) that most closely matches the customer's intent.
+- Consider color, size, style, and use case
+- Match intent and description, not just keywords
+- Return ONLY the number (e.g., "2"), nothing else`;
 
     const userPrompt = `Customer query: "${searchQuery}"
 
 Available products:
 ${productList}
 
-Return only the product number (or 0 if no match):`;
+Best matching product number:`;
 
-    console.log('📤 Calling DeepSeek API...');
+    console.log('📤 Calling DeepSeek API for refinement...');
 
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
@@ -134,7 +136,7 @@ Return only the product number (or 0 if no match):`;
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.3,
-        max_tokens: 10,
+        max_tokens: 5,
       }),
     });
 
@@ -151,8 +153,9 @@ Return only the product number (or 0 if no match):`;
     const productIndex = parseInt(aiResponse) - 1;
 
     if (productIndex < 0 || productIndex >= products.length) {
-      console.log('No suitable match found');
-      return null;
+      // If AI can't decide, return the first match
+      console.log('AI response out of range, returning first match');
+      return products[0];
     }
 
     const bestMatch = products[productIndex];
@@ -161,7 +164,9 @@ Return only the product number (or 0 if no match):`;
     return bestMatch;
   } catch (error) {
     console.error('❌ DeepSeek Error:', error.message);
-    throw error;
+    // Fallback to first product if AI fails
+    console.log('Falling back to first match');
+    return products[0];
   }
 }
 
@@ -190,7 +195,7 @@ exports.handler = async (event, context) => {
     const { query, variantId, quantity = 1 } = body;
 
     // ============================================
-    // VOICE SEARCH - AI-POWERED
+    // VOICE SEARCH - HYBRID (Search + AI Refinement)
     // ============================================
     if (query) {
       console.log(`🎤 Voice Search: "${query}"`);
@@ -207,9 +212,9 @@ exports.handler = async (event, context) => {
       }
 
       try {
-        // Get ALL products from Shopify
-        console.log('📦 Fetching all products from Shopify...');
-        const data = await shopifyRequest(GET_ALL_PRODUCTS_QUERY, { first: 250 });
+        // Step 1: Search for products matching the query
+        console.log('🔍 Searching for products...');
+        const data = await shopifyRequest(SEARCH_PRODUCTS_QUERY, { query });
         const products = data.products.edges.map((edge) => edge.node);
 
         console.log(`Found ${products.length} products`);
@@ -220,13 +225,13 @@ exports.handler = async (event, context) => {
             headers,
             body: JSON.stringify({
               success: false,
-              message: 'No products available',
+              message: `No products found for "${query}"`,
             }),
           };
         }
 
-        // Use DeepSeek AI to find best match
-        const bestMatch = await findProductWithAI(query, products);
+        // Step 2: Use DeepSeek AI to pick the best from search results
+        const bestMatch = await findBestProductWithAI(query, products);
 
         if (!bestMatch) {
           return {
@@ -234,7 +239,7 @@ exports.handler = async (event, context) => {
             headers,
             body: JSON.stringify({
               success: false,
-              message: `No suitable product match found for "${query}"`,
+              message: `No suitable match found`,
             }),
           };
         }
