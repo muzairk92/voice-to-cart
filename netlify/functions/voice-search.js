@@ -51,49 +51,51 @@ function matchProducts(query, allProducts) {
   const queryLower = query.toLowerCase().trim();
   const queryWords = queryLower.split(/\s+/).filter(w => w.length > 0);
   
-  console.log(`🔍 Fuzzy matching "${queryLower}" against ${allProducts.length} products`);
+  console.log(`🔍 Fuzzy matching "${queryLower}" (words: ${queryWords.join(', ')})`);
   
   const scored = allProducts
     .map((product) => {
       const titleLower = product.title.toLowerCase();
       const descLower = (product.description || '').toLowerCase();
-      const combined = `${titleLower} ${descLower}`;
       
       let score = 0;
       
       // PRIORITY 1: Exact title match
       if (titleLower === queryLower) {
-        score += 10000;
+        score = 100000;
+        console.log(`  ✓ Exact match: ${product.title}`);
       }
-      
-      // PRIORITY 2: Phrase match in title
-      if (titleLower.includes(queryLower)) {
-        score += 5000;
+      // PRIORITY 2: Phrase match in title (consecutive words)
+      else if (titleLower.includes(queryLower)) {
+        score = 50000;
+        console.log(`  ✓ Phrase match: ${product.title}`);
       }
-      
-      // PRIORITY 3: All query words in title
-      const allWordsInTitle = queryWords.every(word => titleLower.includes(word));
-      if (allWordsInTitle) {
-        score += 1000;
-      }
-      
-      // PRIORITY 4: Count matching words in title
-      queryWords.forEach((word) => {
-        if (word.length > 2) {
-          if (titleLower.includes(word)) {
-            score += 500;
+      // PRIORITY 3: ALL query words must be in title
+      else {
+        const allWordsInTitle = queryWords.every(word => titleLower.includes(word));
+        
+        if (allWordsInTitle) {
+          // Bonus: products with all words in title
+          score = 10000;
+          
+          // Extra bonus if first word matches first word of title
+          const titleWords = titleLower.split(/\s+/);
+          if (titleWords[0].includes(queryWords[0])) {
+            score += 5000;
+          }
+          
+          console.log(`  ✓ All words in title: ${product.title}`);
+        } else {
+          // Partial match - only if most words match
+          const matchedWords = queryWords.filter(word => titleLower.includes(word)).length;
+          const matchRatio = matchedWords / queryWords.length;
+          
+          if (matchRatio >= 0.75) { // At least 75% of words match
+            score = 1000 * matchRatio;
+            console.log(`  ~ Partial match (${Math.round(matchRatio * 100)}%): ${product.title}`);
           }
         }
-      });
-      
-      // PRIORITY 5: Partial matches in description
-      queryWords.forEach((word) => {
-        if (word.length > 2) {
-          if (descLower.includes(word) && !titleLower.includes(word)) {
-            score += 50;
-          }
-        }
-      });
+      }
       
       return { product, score };
     })
@@ -101,7 +103,11 @@ function matchProducts(query, allProducts) {
     .sort((a, b) => b.score - a.score)
     .slice(0, 1); // Return only the TOP match
   
-  console.log(`✅ Found best match with score: ${scored[0]?.score || 0}`);
+  if (scored.length > 0) {
+    console.log(`✅ Best match: ${scored[0].product.title} (score: ${scored[0].score})`);
+  } else {
+    console.log(`❌ No suitable matches found`);
+  }
   
   return scored.length > 0 ? scored[0].product : null;
 }
