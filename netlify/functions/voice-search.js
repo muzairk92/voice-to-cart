@@ -1,9 +1,10 @@
 // netlify/functions/voice-search.js
-// Variant-Aware Smart Routing
+// Variant-Aware Smart Routing (Frontend Compatible)
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE || 'genfury.myshopify.com';
 const AUTOMATION_TOKEN = process.env.AUTOMATION_TOKEN || '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';
 
+// Added images back into the query so the frontend modal doesn't crash
 const SEARCH_PRODUCTS_QUERY = `
   query SearchProducts($searchQuery: String!) {
     products(first: 5, query: $searchQuery) {
@@ -12,6 +13,13 @@ const SEARCH_PRODUCTS_QUERY = `
           id
           title
           handle
+          images(first: 1) {
+            edges {
+              node {
+                url
+              }
+            }
+          }
           variants(first: 20) {
             edges {
               node {
@@ -68,9 +76,8 @@ exports.handler = async (event) => {
       
       let targetUrl = '';
       let variantMatchFound = false;
-      let selectedVariantId = variants[0].id; // Default to first variant
+      let selectedVariantId = variants[0].id;
 
-      // 1. Check if the user specifically spoke a variant color/size (e.g., "Red")
       if (variants.length > 1) {
         const queryLower = query.toLowerCase();
         const matchedVariant = variants.find(v => {
@@ -85,30 +92,28 @@ exports.handler = async (event) => {
         }
       }
 
-      // 2. DECISION ENGINE (Where do we send the user?)
       if (products.length > 1 && !variantMatchFound) {
-        // SCENARIO 1: Multiple caps exist, user didn't specify color -> Send to Search Results
-        console.log('🔄 Multiple products found. Routing to Search Page.');
         targetUrl = `https://${SHOPIFY_STORE}/search?q=${encodeURIComponent(query)}`;
       } 
       else if (variants.length > 1 && !variantMatchFound) {
-        // SCENARIO 2: One cap found, but it has colors, user didn't specify -> Send to Product Page
-        console.log('🔄 Product has options. Routing to Product Page.');
         targetUrl = `https://${SHOPIFY_STORE}/products/${bestMatch.handle}`;
       } 
       else {
-        // SCENARIO 3: Perfect match (no variants OR user asked for a specific color) -> Add to Cart!
-        console.log('🛒 Perfect match. Adding to Cart.');
         const numericVariantId = selectedVariantId.match(/\/(\d+)$/)[1];
         targetUrl = `https://${SHOPIFY_STORE}/cart/add?id=${numericVariantId}&quantity=1`;
       }
 
+      // RESTORED: Sending the product object so the frontend showSuccessModal works!
       return {
         statusCode: 200,
         headers,
         body: JSON.stringify({
           success: true,
-          checkoutUrl: targetUrl // Your frontend will automatically navigate here
+          checkoutUrl: targetUrl, 
+          product: {
+            title: bestMatch.title,
+            image: bestMatch.images?.edges[0]?.node?.url || null
+          }
         }),
       };
     }
